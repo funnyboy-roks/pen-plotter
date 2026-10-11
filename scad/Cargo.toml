@@ -1,0 +1,7 @@
+[package]
+name = "scad"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scad = { git = "https://github.com/funnyboy-roks/scad-rs.git" }
