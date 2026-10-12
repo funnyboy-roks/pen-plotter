@@ -7,6 +7,8 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -46,9 +48,6 @@ async fn main(spawner: Spawner) -> ! {
         esp_radio::wifi::new(peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
 
-    // TODO: Spawn some tasks
-    let _ = spawner;
-
     let mut x = Axis {
         pos: Input::new(
             peripherals.GPIO2,
@@ -74,6 +73,14 @@ async fn main(spawner: Spawner) -> ! {
         step: Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default()),
     };
 
+    let servo = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
+    let servo_toggle = Input::new(
+        peripherals.GPIO13,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    spawner.spawn(handle_pen(servo).unwrap());
+    spawner.spawn(listen_pen_toggle(servo_toggle).unwrap());
+
     loop {
         if x.step(x.delta()) | y.step(y.delta()) {
             Timer::after_millis(2).await;
@@ -86,6 +93,31 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
+}
+
+pub static PEN_POS: AtomicBool = AtomicBool::new(false);
+
+#[embassy_executor::task]
+async fn listen_pen_toggle(mut input: Input<'static>) {
+    loop {
+        input.wait_for_rising_edge().await;
+        PEN_DOWN.fetch_not(Ordering::SeqCst);
+        Timer::after_millis(10).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn handle_pen(mut output: Output<'static>) {
+    loop {
+        output.set_high();
+        if PEN_DOWN.load(Ordering::SeqCst) {
+            Timer::after_micros(1000).await;
+        } else {
+            Timer::after_micros(2000).await;
+        }
+        output.set_low();
+        Timer::after_millis(20).await;
+    }
 }
 
 struct Axis<'a> {
